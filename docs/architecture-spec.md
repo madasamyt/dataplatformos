@@ -6,10 +6,6 @@
 
 Six-zone medallion-plus lakehouse architecture (Landing → Bronze → Silver → Gold → Semantic → Delivery), designed against one rule: each zone must do a transformation nothing else does, or it doesn't earn a place in the pipeline. Data products are a cross-cutting certification pattern, not a seventh layer. See `decisions.md` for the reasoning trail behind each structural choice below.
 
-# Enterprise Data Platform — Architecture Specification
-
-*Plain-text extraction of the canonical architecture document, for agent/LLM context consumption. The styled HTML version (`data_platform_architecture.html`) is the human-facing artifact; this is a content-complete, zero-decoration companion for `docs/architecture-spec.md`.*
-
 ## The six zones
 
 ### Raw / Landing Layer

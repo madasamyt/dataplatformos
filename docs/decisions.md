@@ -13,6 +13,7 @@ Compressed ADR-style record of design decisions and the reasoning behind them. R
 **Decision:** Bronze does structural typing only and never rejects a record. Malformed/unexpected fields are retained loosely-typed. Quarantine, null-handling, and business-rule validation are Silver's job.
 **Why:** Bronze's value is being a replayable "insurance policy" — every record that arrived is still there. Rejecting records in Bronze breaks that guarantee and means re-deriving rejection logic on every replay.
 **Framework implication:** `quality.on_failure: quarantine` should not be a valid config for a Bronze-zone target in the schema validator — flag it as a validation error if attempted.
+**Intake failures are not quarantine:** A fundamentally corrupt *delivery unit* (truncated file, undecryptable object, non-JSON payload) is not a bad Bronze record — the Landing→Bronze job cannot admit it as a row. Corrupt bytes stay in Landing; the job records an intake/poison failure with attempt limits so the next DAG run does not infinitely reprocess the same unit. See D16.
 
 ### D3 — Delivery is packaging, not a content tier
 **Decision:** Renamed from "Data Products" to "Delivery & Access Layer." A product's *content* is certified in place — Foundation products in Silver, Analytical/360° in Gold, KPI/Dashboard products in Semantic. Delivery is the uniform front door (catalog, entitlement, output-port translation) every certified product passes through regardless of origin tier.
@@ -57,6 +58,7 @@ Compressed ADR-style record of design decisions and the reasoning behind them. R
 ### D13 — Framework is a design-time compiler, not a runtime
 **Decision:** The pipeline framework validates metadata and generates native Airflow DAGs / dbt projects / Meltano configs / Flink manifests, then exits. No framework-owned scheduler, no framework-owned execution engine.
 **Why:** avoids the single biggest over-engineering risk — a custom orchestration runtime the team now has to operate as a second platform, on top of the AWS+Dremio (or any) platform already in place.
+**Compile-first adapters:** Adapter Protocols expose `compile(spec) → GeneratedArtifact`. Native tools (Airflow, dbt, Meltano, Flink, Deequ/GE) are the runtime. Optional thin helper libraries may be *imported by generated jobs* (intake poison markers, Tier-1 reconciliation, quarantine writers) — never a standing framework service.
 
 ### D14 — One default tool per category; commercial tools are optional contrib adapters
 **Decision:** Kafka (not multiple streaming transports), Flink (not Flink + Kinesis Analytics + Lambda treated as three streaming tiers — Lambda is stateless glue only), Airflow, dbt-core, Meltano, Debezium are the shipped defaults. Estuary and Dremio are supported through the same adapter interface but live in `contrib/commercial/`, excluded from the default install, because the project is open-source-first and shouldn't require a commercial dependency to run.
@@ -65,3 +67,22 @@ Compressed ADR-style record of design decisions and the reasoning behind them. R
 ### D15 — Attribute-level contracts, not a full ontology, inside the pipeline framework
 **Decision:** Contracts extend to column granularity (type, valid range, accepted values, simple same-table derivations). Anything needing cross-attribute reasoning, grain-flexible calculation, or semantic relationships points at a Semantic-layer metric (`semantic_ref`) instead of re-declaring logic — and stops there.
 **Why:** a full ontology (ontology/knowledge graph/RAG) is explicitly out of scope for the data substrate — that's Knowledge Core, living in the Agentic Core dimension. Building attribute-level ontology reasoning into the pipeline framework would blur a boundary that's been deliberately kept clean throughout this design.
+
+### D16 — Landing intake failure ≠ Silver quarantine
+**Decision:** Unreadable or fundamentally corrupt delivery units fail at *intake* (Landing→Bronze), not via Bronze `quality.on_failure: quarantine`. Bytes remain in Landing; a poison/control marker (or `_intake_failed/` sidecar) records the error and attempt count. Default: do not re-attempt forever — terminal after `max_attempts` unless an operator clears the marker for deliberate replay.
+**Why:** Quarantine is a business-rule outcome on parseable rows. Intake failure is "this unit never became a row." Collapsing them would either force fake Bronze rows or reintroduce Bronze rejection under another name.
+**Framework implication:** Landing→Bronze steps may declare `intake.on_failure: poison | fail_pipeline` and `intake.max_attempts`. Bronze `quality.on_failure` may only be `warn` or `fail_pipeline`.
+
+### D17 — Segment = multi-pipeline graph; Pipeline = multi-step DAG
+**Decision:** A `Pipeline` is an ordered/DAG of zone-transition *steps*. A `Segment` is the project-level graph that binds landing spaces and multiple pipelines that are not necessarily one chronology (e.g. parallel source ingest + a later conform pipeline).
+**Why:** Real platform slices are not linear. Forcing everything into one pipeline file either lies about dependencies or creates god-files.
+**Framework implication:** CLI validates/compiles a *project directory* (segment + refs), not only a single YAML file.
+
+### D19 — ML model invocation is a typed custom carve-out (`engine: ml`)
+**Decision:** Invoking a registered ML model is still a governed pipeline step (inputs, outputs, trigger, `quality.contract_ref`). Prefer `transform.engine: ml` with required `transform.ml.model_ref` when the step scores/trains against a model registry. `engine: custom` remains valid for arbitrary containers that are not model invocations.
+**Why:** The custom carve-out already prevents escaping lineage/observability; a typed `ml` engine makes model provenance explicit in metadata and generated manifests without inventing a second runtime.
+**Rejected:** A separate ML orchestration platform inside the compiler, or allowing model steps without contracts.
+
+### D20 — Metric and DataProduct are first-class segment kinds
+**Decision:** Segments may declare `metrics[]` and `products[]` refs. Metrics are authored once (`semantic/v1`) and compiled to MetricFlow-style YAML. Data products (`delivery/v1`) certify content in place (Silver/Gold/Semantic/Metric) and emit Delivery packaging + re-certification watch lists (D11).
+**Framework implication:** `contract_attributes.derived_from.semantic_ref` must resolve to a Metric id in the same segment. KPI/dashboard products must source from `semantic` or `metric` (D4).

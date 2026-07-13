@@ -62,54 +62,107 @@ The compiler is the only thing that needs to be "always available" — it can ru
 
 ---
 
-## 3. Metadata schema (v1, revised)
+## 3. Metadata schema (v1)
+
+Validation and compile operate on a **project directory**: a `Segment` plus referenced `Pipeline` (and optional `Contract`) files. A segment is a multi-pipeline graph for one slice of the platform — not necessarily one chronology. A pipeline is a multi-step DAG of zone transitions.
+
+### 3.1 Segment (project root)
+
+```yaml
+apiVersion: platform/v1
+kind: Segment
+metadata:
+  id: commerce.orders
+  domain: commerce
+  owner: team-commerce-eng
+  description: "Commerce orders ingest and conformation"
+
+spec:
+  landingSpaces:
+    - id: shopify_files
+      mode: platform_owned          # platform_owned | tool_managed | source_owned
+      storageRef: s3://acme-landing/shopify/
+    - id: meltano_shopify_internal
+      mode: tool_managed            # no storageRef — tool owns raw staging
+    - id: netsuite_ods
+      mode: source_owned            # source/ODS is the replay baseline
+
+  pipelines:
+    - ref: pipelines/shopify_orders.yaml
+    - ref: pipelines/netsuite_orders.yaml
+    - ref: pipelines/orders_conform.yaml
+```
+
+`platform_owned` spaces require `storageRef`. `tool_managed` and `source_owned` must omit it (or the validator warns and ignores it).
+
+### 3.2 Pipeline (multi-step)
 
 ```yaml
 apiVersion: pipeline/v1
 kind: Pipeline
 metadata:
-  id: commerce.orders.shopify
+  id: commerce.shopify_orders
   domain: commerce
   owner: team-commerce-eng
-  description: "Ingest and conform Shopify orders"
+  description: "Land Shopify orders into Bronze then conform toward Silver inputs"
   tags: [orders, shopify, pii]
 
 spec:
-  source:
-    type: api                       # api | db_cdc | file | stream | custom
-    connector: meltano.tap-shopify  # namespaced: <adapter>.<specific-connector>
-    connection_ref: secrets/shopify_prod
-    pattern: incremental            # incremental | full_snapshot | cdc | streaming
-    incremental_key: updated_at
-    trigger:
-      mode: cron                    # cron | event | continuous
-      schedule: "cron(0 * * * ? *)" # required if mode: cron
-      # continuous mode (e.g. a Flink job): orchestrator supervises liveness
-      # instead of scheduling discrete runs — no `schedule` field needed
+  steps:
+    - id: land_to_bronze
+      dependsOn: []
+      source:
+        type: file                  # api | db_cdc | file | stream | custom
+        landingSpace: shopify_files # must reference a segment landingSpace when platform_owned
+        connector: meltano.tap-shopify
+        connection_ref: secrets/shopify_prod
+        pattern: incremental        # incremental | full_snapshot | cdc | streaming
+        incremental_key: updated_at
+      target:
+        zone: bronze
+        catalog: lakehouse
+        schema: bronze.shopify
+        object: shopify__orders
+        format: iceberg
+      transform:
+        engine: dbt                 # dbt | flink | spark | custom
+        ref: models/bronze/shopify__orders.sql
+        dbt:
+          project: bronze_project
+          select: shopify__orders
+      trigger:
+        mode: cron                  # cron | event | continuous
+        schedule: "cron(0 * * * ? *)"
+      intake:                       # Landing→Bronze only — not Silver quarantine
+        on_failure: poison          # poison | fail_pipeline
+        max_attempts: 3
+      quality:
+        engine: deequ
+        contract_ref: contracts/shopify_orders_bronze.yml
+        on_failure: warn            # bronze: warn | fail_pipeline only — never quarantine
+      lineage:
+        upstream: [landing.shopify.orders]
+        downstream: [silver.commerce.orders]
+      extensions:
+        acme.compliance.pii_fields: [customer_email, customer_phone]
+        acme.cost_center: CMX-2201
 
-  target:
-    zone: bronze
-    catalog: lakehouse
-    schema: bronze.shopify
-    object: shopify__orders
-    format: iceberg
+    - id: bronze_typed_checks
+      dependsOn: [land_to_bronze]
+      # ... additional steps as needed
+```
 
-  transform:
-    engine: dbt                     # dbt | flink | spark | custom
-    ref: models/bronze/shopify__orders.sql
-    dbt:
-      project: bronze_project
-      select: shopify__orders
+### 3.3 Contract (standalone — source of truth for attributes)
 
-  quality:
-    engine: deequ                   # deequ | great_expectations — pick per tier, see §1
-    contract_ref: contracts/shopify_orders_v1.yml
-    on_failure: quarantine          # quarantine | fail_pipeline | warn
+Contracts live in their own files referenced by `quality.contract_ref`. Do not duplicate `contract_attributes` inline on the pipeline except in documentation examples.
 
-  # Attribute-level contract extension — lives in contract_ref, shown inline here for clarity.
-  # Extends the existing SLA/schema contract down to the column level, WITHOUT duplicating
-  # anything Semantic already owns.
-  contract_attributes:
+```yaml
+apiVersion: contract/v1
+kind: Contract
+metadata:
+  id: shopify_orders_bronze
+spec:
+  attributes:
     - name: order_id
       type: string
       nullable: false
@@ -119,108 +172,106 @@ spec:
     - name: net_amount
       type: decimal
       valid_range: {min: 0}
-      derived_from: "gross_amount - discount_amount"   # simple same-table calc, fine to inline
+      derived_from: "gross_amount - discount_amount"
     - name: net_revenue
       type: decimal
-      derived_from: {semantic_ref: semantic.commerce.net_revenue}  # anything needing grain
-      # flexibility points at the Semantic metric instead of re-declaring the formula
-
-  lineage:
-    upstream: [landing.shopify.orders]
-    downstream: [silver.commerce.orders]
-
-  extensions:                       # free-form, namespaced — anything the core schema doesn't model yet
-    acme.compliance.pii_fields: [customer_email, customer_phone]
-    acme.cost_center: CMX-2201
+      derived_from: {semantic_ref: semantic.commerce.net_revenue}
 ```
 
+**Hard validation rules (v0.1):**
+- `quality.on_failure: quarantine` is **invalid** when `target.zone` is `bronze` (or `landing`).
+- Bronze/Landing quality may only use `warn` or `fail_pipeline`.
+- `intake` is only valid on steps whose target zone is `bronze` and whose source uses a landing space / file/CDC ingest path.
+- Every `landingSpace` id referenced by a pipeline must exist on the segment.
+- Step `dependsOn` and pipeline refs must resolve; IDs must be unique within the project.
+- A `custom` transform step must declare inputs/outputs (via source/target), `trigger`, and `quality.contract_ref`.
+
 **What changed from the prior draft, and why:**
-- `trigger` is now its own object supporting `cron | event | continuous` — a continuous-mode pipeline (a Flink job) is *supervised for liveness* by the orchestrator, not scheduled as discrete task instances. This is the explicit mechanism for mixing job-based and streaming steps in one lineage graph.
-- `contract_attributes` extends the contract to column granularity, but stops short of a full ontology: derived attributes either inline a simple same-table formula or **point at a Semantic metric** rather than re-declaring logic Semantic already owns — deliberately not a parallel knowledge model.
-- `quality.engine` is explicit per pipeline, not global, so Bronze/Silver pipelines default to `deequ` and Gold/Semantic/Delivery-facing contract checks default to `great_expectations` without a special case in the schema itself.
+- **Segment + multi-step pipelines** replace the single-hop YAML — platform slices are graphs, not one chronology.
+- **`intake`** distinguishes corrupt delivery units from Silver quarantine (D16).
+- **`landingSpaces`** make Landing ownership explicit (D18).
+- **Contracts are files** — `contract_ref` is authoritative; inline attributes in docs are illustrative only.
+- `trigger` supports `cron | event | continuous` for mixing batch and streaming steps in one lineage graph.
+- `quality.engine` stays per-step so Bronze/Silver can default to `deequ` and Gold+ to `great_expectations`.
 
 ---
 
-## 4. Plugin architecture — the seam that keeps this from being a monolith
+## 4. Plugin architecture — compile-first seam
 
-Four adapter interfaces, each a small Python `Protocol`/ABC. This is deliberately the *only* extension mechanism — a community adapter for Airbyte, Snowflake-as-catalog, or a second orchestrator later is "implement this interface," not "fork the core."
+Four adapter interfaces, each a small Python `Protocol`/ABC. Adapters **compile** metadata into native artifacts. They do not extract or validate data inside the compiler process.
 
 ```python
 class SourceConnector(Protocol):
-    def extract(self, spec: SourceSpec) -> ExtractionResult: ...
-    def report_metadata(self) -> dict:  # row count, checksum, max(incremental_key)
-        ...  # feeds Tier-1 source-vs-Bronze reconciliation
+    def compile(self, spec: SourceSpec) -> GeneratedArtifact: ...
+    # Generated jobs may call a small helper for Tier-1 reconciliation:
+    # report_metadata() → entity-key presence / checksums (not raw row counts)
 
 class TransformEngine(Protocol):
     def compile(self, spec: TransformSpec) -> GeneratedArtifact: ...
 
 class QualityEngine(Protocol):
-    def validate(self, contract: Contract, target: TableRef) -> ValidationResult: ...
+    def compile(self, contract: Contract, target: TableRef) -> GeneratedArtifact: ...
 
 class CatalogWriter(Protocol):
-    def register(self, schema: TableSchema, lineage: LineageEdge) -> None: ...
+    def compile_registration(self, schema: TableSchema, lineage: LineageEdge) -> GeneratedArtifact: ...
 ```
 
-Shipped implementations: `MeltanoConnector`, `DebeziumConnector`, `DbtEngine`, `FlinkEngine`, `SparkEngine`, `CustomContainerEngine`, `DeequEngine`, `GreatExpectationsEngine`, `IcebergRestCatalogWriter`. `EstuaryConnector` and `DremioCatalogWriter` ship as clearly-labeled `contrib/commercial/` adapters — present in the repo, not in the default dependency set, so `pip install pipeline-framework` doesn't pull commercial SDKs.
+Shipped implementations (later milestones): `MeltanoConnector`, `DebeziumConnector`, `DbtEngine`, `FlinkEngine`, `SparkEngine`, `CustomContainerEngine`, `DeequEngine`, `GreatExpectationsEngine`, `IcebergRestCatalogWriter`. `EstuaryConnector` and `DremioCatalogWriter` live in `contrib/commercial/`.
 
 ---
 
 ## 5. The custom carve-out
 
-Unchanged in principle from the prior draft: a `transform.engine: custom` step still declares `inputs`, `outputs`, `trigger`, and `quality.contract_ref` like any other step. The generator emits a container/task definition instead of a dbt/Flink manifest, but lineage, scheduling, and quality-gating stay uniform. This is enforced by the schema, not convention — the validator rejects a `custom` block missing those fields exactly as it would reject a malformed `dbt` block.
+Unchanged in principle: a `transform.engine: custom` step still declares inputs, outputs, `trigger`, and `quality.contract_ref`. The generator emits a container/task definition instead of a dbt/Flink manifest, but lineage, scheduling, and quality-gating stay uniform. Enforced by the schema, not convention.
 
 ---
 
-## 6. Repository structure (for the coding agent to scaffold)
+## 6. Repository structure
 
 ```
-pipeline-framework/
+dataplatformos/
 ├── schema/
-│   └── pipeline.v1.schema.json          # JSON Schema, versioned
-├── compiler/
-│   ├── validator.py
-│   └── generators/
-│       ├── airflow_dag_generator.py
-│       ├── dbt_project_generator.py
-│       ├── meltano_config_generator.py
-│       └── flink_job_manifest.py
-├── adapters/
-│   ├── source/  { meltano.py, debezium.py }
-│   ├── transform/ { dbt.py, flink.py, spark.py, custom.py }
-│   ├── quality/ { deequ.py, great_expectations.py }
-│   └── catalog/ { iceberg_rest.py }
+│   ├── segment.v1.schema.json
+│   ├── pipeline.v1.schema.json
+│   └── contract.v1.schema.json
+├── src/dataplatformos/
+│   ├── cli.py                         # `pipeline validate|compile|lineage|docs`
+│   ├── compiler/
+│   │   └── validator.py
+│   ├── adapters/                      # populated from v0.2+
+│   └── lineage/
 ├── contrib/commercial/
-│   ├── estuary.py
-│   └── dremio_catalog.py
-├── cli/
-│   └── pipeline.py                       # `pipeline validate|compile|lineage|docs`
-├── lineage/
-│   └── openlineage_emitter.py
 ├── examples/
-│   ├── shopify_orders.pipeline.yaml
-│   └── device_json_stream.pipeline.yaml
+│   └── commerce_orders/               # segment project
 ├── docs/
-└── tests/
+├── tests/
+└── pyproject.toml
 ```
 
-CLI surface: `pipeline validate <file>`, `pipeline compile <file> --target airflow`, `pipeline lineage --format openlineage`, `pipeline docs generate` (→ dbt-docs-style site plus a KPI provenance report, per §7).
+CLI surface (v0.1): `pipeline validate <project-dir>`. Later: `pipeline compile <project-dir> --target airflow`, `pipeline lineage`, `pipeline docs generate`.
 
 ---
 
 ## 7. Lineage and KPI documentation — generated, not hand-maintained
 
-Because every pipeline declares `lineage.upstream`/`downstream`, and a Semantic metric's `contract_attributes.derived_from.semantic_ref` chains back through Gold to Bronze to source, `pipeline docs generate` can walk the full graph automatically: **Q3 Board Revenue KPI → Semantic definition → Gold fact table → Silver entity → Bronze table → source system**, without a hand-maintained wiki page. `dbt docs generate` already produces most of this for the dbt-owned hops; OpenLineage events fill in the rest (source connector runs, Flink jobs) in a compatible format, so nothing framework-specific is needed for the output format.
+Because every step declares `lineage.upstream`/`downstream`, and (in later milestones) Semantic metrics chain via `semantic_ref`, `pipeline docs generate` can walk the graph automatically. `dbt docs generate` covers dbt hops; OpenLineage fills in connector/Flink hops. KPI provenance reports require `Metric` / `DataProduct` kinds (deferred — see roadmap).
 
 ---
 
-## 8. Build roadmap (milestones for an agent to work through incrementally)
+## 8. Build roadmap
 
-1. **v0.1** — JSON Schema + validator + `pipeline validate` CLI. No generators yet. Get the contract right before generating anything against it.
-2. **v0.2** — Airflow DAG generator + dbt project generator. This alone covers the entire batch-SQL happy path (source→Bronze→Silver→Gold via dbt) and is worth shipping on its own.
-3. **v0.3** — Meltano and Debezium source adapters, including `report_metadata()` for Tier-1 reconciliation.
-4. **v0.4** — Flink adapter + `continuous` trigger mode in the Airflow generator (supervision, not scheduling).
-5. **v0.5** — Deequ and Great Expectations quality adapters, wired to `on_failure` handling.
-6. **v0.6** — OpenLineage emission + `pipeline docs generate` (§7).
-7. **v1.0** — Plugin SDK documentation stabilized; `contrib/commercial/` adapters (Estuary, Dremio) as reference implementations of the plugin interface, proving the seam works for something the core team didn't build.
+1. **v0.1** ✅ — Segment/Pipeline/Contract JSON Schema + project validator + `pipeline validate <project-dir>`.
+2. **v0.2** ✅ — Airflow DAG generator + dbt project generator for multi-step batch SQL hops.
+3. **v0.3** ✅ — Meltano and Debezium source adapters; emit Tier-1 reconciliation task stubs (entity-key / checksum).
+4. **v0.4** ✅ — Flink adapter + `continuous` trigger supervision in Airflow.
+5. **v0.5** ✅ — Deequ and Great Expectations quality adapters + intake poison helpers in `dataplatformos.runtime.hooks`.
+6. **v0.6** ✅ — OpenLineage emission + hop-level `pipeline docs generate`.
+7. **v0.7** ✅ — `Metric` kind + MetricFlow-style generator; enforce `semantic_ref` resolution.
+8. **v0.8** ✅ — `DataProduct` kind (ports, SLA, consumption domain) + lineage-aware re-certification stubs (D11).
+9. **v1.0** ✅ (docs) — Plugin SDK docs in `docs/plugin-sdk.md`; `contrib/commercial/` Estuary + Dremio as reference plugins.
 
-Each milestone is independently useful — v0.2 alone is a legitimate tool for a team doing only batch SQL work, which is a good sanity check that the design isn't over-built relative to what an early adopter actually needs.
+**Also:** `transform.engine: ml` — typed model invocation (D19); `custom` still valid for non-model containers.
+
+**v1 non-goals:** marketplace UI, MDM stewardship apps, Goal Registry service, query-engine ownership, MCP auto-remediation agents, Kinesis as a second streaming transport.
+
+CLI: `pipeline validate|compile|docs generate|lineage <project-dir>`.
