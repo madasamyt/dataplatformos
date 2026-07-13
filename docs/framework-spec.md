@@ -130,8 +130,8 @@ spec:
     downstream: [silver.commerce.orders]
 
   extensions:                       # free-form, namespaced — anything the core schema doesn't model yet
-    nuskin.compliance.pii_fields: [customer_email, customer_phone]
-    nuskin.cost_center: CMX-2201
+    acme.compliance.pii_fields: [customer_email, customer_phone]
+    acme.cost_center: CMX-2201
 ```
 
 **What changed from the prior draft, and why:**
