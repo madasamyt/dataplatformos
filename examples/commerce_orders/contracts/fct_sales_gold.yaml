@@ -1,0 +1,15 @@
+apiVersion: contract/v1
+kind: Contract
+metadata:
+  id: fct_sales_gold
+spec:
+  attributes:
+    - name: order_id
+      type: string
+      nullable: false
+    - name: net_amount
+      type: decimal
+      valid_range: { min: 0 }
+    - name: net_revenue
+      type: decimal
+      derived_from: { semantic_ref: semantic.commerce.net_revenue }

@@ -1,0 +1,67 @@
+apiVersion: pipeline/v1
+kind: Pipeline
+metadata:
+  id: commerce.orders_gold
+  domain: commerce
+  owner: team-commerce-eng
+  description: "Gold sales fact and daily aggregate"
+spec:
+  steps:
+    - id: silver_to_fct_sales
+      source:
+        type: table
+        catalog: lakehouse
+        schema: silver.commerce
+        object: orders
+      target:
+        zone: gold
+        catalog: lakehouse
+        schema: gold.commerce
+        object: fct_sales
+        format: iceberg
+      transform:
+        engine: dbt
+        ref: models/gold/fct_sales.sql
+        dbt:
+          project: gold_project
+          select: fct_sales
+      trigger:
+        mode: cron
+        schedule: "cron(45 * * * ? *)"
+      quality:
+        engine: great_expectations
+        contract_ref: contracts/fct_sales_gold.yaml
+        on_failure: fail_pipeline
+      lineage:
+        upstream: [silver.commerce.orders]
+        downstream: [gold.commerce.agg_orders_daily, semantic.commerce.net_revenue]
+
+    - id: fct_to_daily_agg
+      dependsOn: [silver_to_fct_sales]
+      source:
+        type: table
+        catalog: lakehouse
+        schema: gold.commerce
+        object: fct_sales
+      target:
+        zone: gold
+        catalog: lakehouse
+        schema: gold.commerce
+        object: agg_orders_daily
+        format: iceberg
+      transform:
+        engine: dbt
+        ref: models/gold/agg_orders_daily.sql
+        dbt:
+          project: gold_project
+          select: agg_orders_daily
+      trigger:
+        mode: cron
+        schedule: "cron(50 * * * ? *)"
+      quality:
+        engine: great_expectations
+        contract_ref: contracts/agg_orders_daily_gold.yaml
+        on_failure: fail_pipeline
+      lineage:
+        upstream: [gold.commerce.fct_sales]
+        downstream: [product.merchandising.regional_sales]

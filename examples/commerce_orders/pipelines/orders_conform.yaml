@@ -1,0 +1,40 @@
+apiVersion: pipeline/v1
+kind: Pipeline
+metadata:
+  id: commerce.orders_conform
+  domain: commerce
+  owner: team-commerce-eng
+  description: "Conform Shopify + NetSuite orders into Silver (separate chronology)"
+spec:
+  steps:
+    - id: bronze_to_silver
+      source:
+        type: table
+        catalog: lakehouse
+        schema: bronze.shopify
+        object: shopify__orders
+      target:
+        zone: silver
+        catalog: lakehouse
+        schema: silver.commerce
+        object: orders
+        format: iceberg
+      transform:
+        engine: dbt
+        ref: models/silver/orders.sql
+        dbt:
+          project: silver_project
+          select: orders
+      trigger:
+        mode: cron
+        schedule: "cron(30 * * * ? *)"
+      quality:
+        engine: deequ
+        contract_ref: contracts/orders_silver.yaml
+        on_failure: quarantine
+      lineage:
+        upstream:
+          - bronze.shopify.shopify__orders
+          - bronze.netsuite.netsuite__orders
+        downstream:
+          - gold.commerce.fct_sales

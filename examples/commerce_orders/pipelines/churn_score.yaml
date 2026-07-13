@@ -1,0 +1,46 @@
+apiVersion: pipeline/v1
+kind: Pipeline
+metadata:
+  id: commerce.churn_score
+  domain: commerce
+  owner: team-ml-eng
+  description: "Batch-score churn model into an AI/ML feature product table"
+  tags: [ml, churn]
+spec:
+  steps:
+    - id: score_churn
+      source:
+        type: table
+        catalog: lakehouse
+        schema: silver.commerce
+        object: orders
+      target:
+        zone: gold
+        catalog: lakehouse
+        schema: gold.commerce
+        object: customer_churn_scores
+        format: iceberg
+      transform:
+        engine: ml
+        image: acme/ml-runner:1.2
+        ml:
+          model_ref: registry://acme/churn_xgb@3
+          task: batch_score
+          framework: sklearn
+          feature_ref: gold.commerce.customer_order_summary
+        command:
+          - python
+          - -m
+          - acme.scoring
+          - --model
+          - registry://acme/churn_xgb@3
+      trigger:
+        mode: cron
+        schedule: "cron(0 6 * * ? *)"
+      quality:
+        engine: great_expectations
+        contract_ref: contracts/churn_scores.yaml
+        on_failure: fail_pipeline
+      lineage:
+        upstream: [silver.commerce.orders]
+        downstream: [product.cx.churn_scores]

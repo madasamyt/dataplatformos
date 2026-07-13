@@ -1,0 +1,16 @@
+apiVersion: semantic/v1
+kind: Metric
+metadata:
+  id: semantic.commerce.net_revenue
+  domain: commerce
+  owner: team-finance-analytics
+  description: "Sum of net order amount"
+spec:
+  label: Net Revenue
+  type: simple
+  model: gold.commerce.fct_sales
+  measure:
+    expr: net_amount
+    agg: sum
+  dimensions: [order_date, region, channel]
+  filter: "order_status not in ('cancelled')"

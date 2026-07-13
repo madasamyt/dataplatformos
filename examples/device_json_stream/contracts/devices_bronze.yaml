@@ -1,0 +1,14 @@
+apiVersion: contract/v1
+kind: Contract
+metadata:
+  id: devices_bronze
+spec:
+  attributes:
+    - name: device_id
+      type: string
+      nullable: false
+    - name: event_ts
+      type: timestamp
+      nullable: false
+    - name: payload
+      type: variant

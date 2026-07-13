@@ -1,0 +1,15 @@
+apiVersion: contract/v1
+kind: Contract
+metadata:
+  id: netsuite_orders_bronze
+spec:
+  attributes:
+    - name: order_id
+      type: string
+      nullable: false
+    - name: _cdc_operation
+      type: string
+      accepted_values: [c, u, d]
+    - name: _source_commit_ts
+      type: timestamp
+      nullable: false

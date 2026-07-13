@@ -1,0 +1,14 @@
+apiVersion: semantic/v1
+kind: Metric
+metadata:
+  id: semantic.commerce.order_count
+  domain: commerce
+  owner: team-finance-analytics
+spec:
+  label: Order Count
+  type: simple
+  model: gold.commerce.fct_sales
+  measure:
+    expr: order_id
+    agg: count_distinct
+  dimensions: [order_date, region, channel]

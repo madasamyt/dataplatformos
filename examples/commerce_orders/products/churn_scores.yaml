@@ -1,0 +1,24 @@
+apiVersion: delivery/v1
+kind: DataProduct
+metadata:
+  id: product.cx.churn_scores
+  owner: team-ml-eng
+spec:
+  name: Customer Churn Scores
+  owningDomain: customer_experience
+  productType: aiml
+  source:
+    kind: gold
+    ref: gold.commerce.customer_churn_scores
+  certification:
+    status: provisional
+    version: "0.9"
+    certifiedBy: ml-platform
+  sla:
+    freshness: P1D
+    correctedWithin: PT24H
+  outputPorts:
+    - type: sql
+    - type: api
+  dependsOn:
+    - gold.commerce.customer_churn_scores

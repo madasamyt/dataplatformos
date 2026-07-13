@@ -1,0 +1,47 @@
+apiVersion: pipeline/v1
+kind: Pipeline
+metadata:
+  id: commerce.shopify_orders
+  domain: commerce
+  owner: team-commerce-eng
+  description: "Shopify orders into Bronze"
+  tags: [orders, shopify, pii]
+spec:
+  steps:
+    - id: land_to_bronze
+      dependsOn: []
+      source:
+        type: file
+        landingSpace: shopify_files
+        connector: meltano.tap-shopify
+        connection_ref: secrets/shopify_prod
+        pattern: incremental
+        incremental_key: updated_at
+      target:
+        zone: bronze
+        catalog: lakehouse
+        schema: bronze.shopify
+        object: shopify__orders
+        format: iceberg
+      transform:
+        engine: dbt
+        ref: models/bronze/shopify__orders.sql
+        dbt:
+          project: bronze_project
+          select: shopify__orders
+      trigger:
+        mode: cron
+        schedule: "cron(0 * * * ? *)"
+      intake:
+        on_failure: poison
+        max_attempts: 3
+      quality:
+        engine: deequ
+        contract_ref: contracts/shopify_orders_bronze.yaml
+        on_failure: warn
+      lineage:
+        upstream: [landing.shopify.orders]
+        downstream: [silver.commerce.orders]
+      extensions:
+        acme.compliance.pii_fields: [customer_email, customer_phone]
+        acme.cost_center: CMX-2201

@@ -1,0 +1,15 @@
+apiVersion: contract/v1
+kind: Contract
+metadata:
+  id: agg_orders_daily_gold
+spec:
+  attributes:
+    - name: order_date
+      type: date
+      nullable: false
+    - name: region
+      type: string
+    - name: order_count
+      type: integer
+    - name: net_amount
+      type: decimal

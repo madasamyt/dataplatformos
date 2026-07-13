@@ -1,0 +1,21 @@
+apiVersion: pipeline/v1
+kind: Pipeline
+metadata:
+  id: fixtures.missing_landing
+spec:
+  steps:
+    - id: land_to_bronze
+      source:
+        type: file
+        landingSpace: does_not_exist
+      target:
+        zone: bronze
+        object: t
+        format: iceberg
+      trigger:
+        mode: event
+      intake:
+        on_failure: poison
+      quality:
+        contract_ref: contract.yaml
+        on_failure: warn

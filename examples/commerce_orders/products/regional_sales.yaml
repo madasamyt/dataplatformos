@@ -1,0 +1,27 @@
+apiVersion: delivery/v1
+kind: DataProduct
+metadata:
+  id: product.merchandising.regional_sales
+  owner: vp-merchandising
+  description: "Regional sales performance for Merchandising"
+spec:
+  name: Regional Sales Performance Product
+  owningDomain: merchandising
+  productType: analytical
+  source:
+    kind: gold
+    ref: gold.commerce.agg_orders_daily
+  certification:
+    status: certified
+    version: "1.0"
+    certifiedBy: merchandising-data-council
+  sla:
+    freshness: PT2H
+  outputPorts:
+    - type: sql
+      name: warehouse
+    - type: bi
+      name: looker
+  dependsOn:
+    - gold.commerce.agg_orders_daily
+    - gold.commerce.fct_sales

@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dataplatformos.dev/schemas/pipeline.v1.schema.json",
+  "title": "Pipeline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "pipeline/v1" },
+    "kind": { "const": "Pipeline" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "domain": { "type": "string" },
+        "owner": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "target", "trigger", "quality"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "dependsOn": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "source": { "$ref": "#/$defs/source" },
+        "target": { "$ref": "#/$defs/target" },
+        "transform": { "$ref": "#/$defs/transform" },
+        "trigger": { "$ref": "#/$defs/trigger" },
+        "intake": { "$ref": "#/$defs/intake" },
+        "quality": { "$ref": "#/$defs/quality" },
+        "lineage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "upstream": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "downstream": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "transform": {
+                "properties": { "engine": { "enum": ["custom", "ml"] } },
+                "required": ["engine"]
+              }
+            },
+            "required": ["transform"]
+          },
+          "then": {
+            "required": ["source", "target", "trigger", "quality"]
+          }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["api", "db_cdc", "file", "stream", "custom", "table"]
+        },
+        "landingSpace": { "type": "string" },
+        "connector": { "type": "string" },
+        "connection_ref": { "type": "string" },
+        "pattern": {
+          "type": "string",
+          "enum": ["incremental", "full_snapshot", "cdc", "streaming"]
+        },
+        "incremental_key": { "type": "string" },
+        "object": { "type": "string" },
+        "catalog": { "type": "string" },
+        "schema": { "type": "string" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["zone", "object"],
+      "properties": {
+        "zone": {
+          "type": "string",
+          "enum": ["landing", "bronze", "silver", "gold", "semantic", "delivery"]
+        },
+        "catalog": { "type": "string" },
+        "schema": { "type": "string" },
+        "object": { "type": "string", "minLength": 1 },
+        "format": {
+          "type": "string",
+          "enum": ["iceberg", "parquet", "json", "avro", "view", "metric"]
+        }
+      }
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine"],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "enum": ["dbt", "flink", "spark", "custom", "ml", "none"]
+        },
+        "ref": { "type": "string" },
+        "dbt": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": { "type": "string" },
+            "select": { "type": "string" }
+          }
+        },
+        "image": { "type": "string" },
+        "command": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "ml": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model_ref"],
+          "properties": {
+            "model_ref": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Model registry URI or name@version"
+            },
+            "task": {
+              "type": "string",
+              "enum": ["inference", "batch_score", "train"]
+            },
+            "framework": {
+              "type": "string",
+              "description": "e.g. sklearn, pytorch, spark_ml — informational"
+            },
+            "feature_ref": {
+              "type": "string",
+              "description": "Optional feature table / view feeding the model"
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "engine": { "const": "ml" } },
+            "required": ["engine"]
+          },
+          "then": { "required": ["ml"] }
+        }
+      ]
+    },
+    "trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["cron", "event", "continuous"]
+        },
+        "schedule": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "mode": { "const": "cron" } },
+            "required": ["mode"]
+          },
+          "then": { "required": ["schedule"] }
+        }
+      ]
+    },
+    "intake": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["on_failure"],
+      "properties": {
+        "on_failure": {
+          "type": "string",
+          "enum": ["poison", "fail_pipeline"]
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_ref", "on_failure"],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "enum": ["deequ", "great_expectations"]
+        },
+        "contract_ref": { "type": "string", "minLength": 1 },
+        "on_failure": {
+          "type": "string",
+          "enum": ["quarantine", "fail_pipeline", "warn"]
+        }
+      }
+    }
+  }
+}

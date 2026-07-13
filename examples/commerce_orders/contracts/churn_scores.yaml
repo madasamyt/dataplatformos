@@ -1,0 +1,18 @@
+apiVersion: contract/v1
+kind: Contract
+metadata:
+  id: churn_scores
+spec:
+  attributes:
+    - name: customer_id
+      type: string
+      nullable: false
+    - name: churn_score
+      type: float
+      valid_range: { min: 0, max: 1 }
+    - name: model_version
+      type: string
+      nullable: false
+    - name: scored_at
+      type: timestamp
+      nullable: false

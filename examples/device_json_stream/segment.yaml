@@ -1,0 +1,14 @@
+apiVersion: platform/v1
+kind: Segment
+metadata:
+  id: devices.json_stream
+  domain: devices
+  owner: team-iot-eng
+  description: "Device JSON stream via Flink"
+spec:
+  landingSpaces:
+    - id: device_kafka
+      mode: platform_owned
+      storageRef: kafka://acme-kafka/landing.devices.raw
+  pipelines:
+    - ref: pipelines/device_json_stream.yaml

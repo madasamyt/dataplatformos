@@ -1,0 +1,30 @@
+apiVersion: platform/v1
+kind: Segment
+metadata:
+  id: commerce.orders
+  domain: commerce
+  owner: team-commerce-eng
+  description: "Commerce orders ingest, conformation, metrics, and products"
+spec:
+  landingSpaces:
+    - id: shopify_files
+      mode: platform_owned
+      storageRef: s3://acme-landing/shopify/
+    - id: meltano_shopify_internal
+      mode: tool_managed
+    - id: netsuite_ods
+      mode: source_owned
+  pipelines:
+    - ref: pipelines/shopify_orders.yaml
+    - ref: pipelines/netsuite_orders.yaml
+    - ref: pipelines/orders_conform.yaml
+    - ref: pipelines/orders_gold.yaml
+    - ref: pipelines/churn_score.yaml
+  metrics:
+    - ref: metrics/net_revenue.yaml
+    - ref: metrics/order_count.yaml
+    - ref: metrics/aov.yaml
+  products:
+    - ref: products/regional_sales.yaml
+    - ref: products/board_revenue_kpi.yaml
+    - ref: products/churn_scores.yaml

@@ -1,0 +1,25 @@
+apiVersion: delivery/v1
+kind: DataProduct
+metadata:
+  id: product.finance.board_revenue_kpi
+  owner: cfo-office
+spec:
+  name: Q3 Board Revenue KPI
+  owningDomain: finance
+  productType: kpi
+  source:
+    kind: metric
+    ref: semantic.commerce.net_revenue
+  metricRef: semantic.commerce.net_revenue
+  certification:
+    status: certified
+    version: "2026.Q3"
+    certifiedBy: finance-governance
+    notes: "Constant currency; excludes cancelled-but-unshipped"
+  sla:
+    freshness: P1D
+  outputPorts:
+    - type: bi
+      name: board_deck
+    - type: api
+      name: kpi_api

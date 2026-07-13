@@ -1,0 +1,20 @@
+apiVersion: pipeline/v1
+kind: Pipeline
+metadata:
+  id: fixtures.bronze_quarantine
+spec:
+  steps:
+    - id: land_to_bronze
+      source:
+        type: file
+        landingSpace: files
+      target:
+        zone: bronze
+        object: bad__table
+        format: iceberg
+      trigger:
+        mode: cron
+        schedule: "cron(0 * * * ? *)"
+      quality:
+        contract_ref: contract.yaml
+        on_failure: quarantine

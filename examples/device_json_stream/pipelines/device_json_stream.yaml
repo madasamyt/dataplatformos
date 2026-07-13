@@ -1,0 +1,35 @@
+apiVersion: pipeline/v1
+kind: Pipeline
+metadata:
+  id: devices.device_json_stream
+  domain: devices
+  description: "Flink job typing raw device JSON into Bronze"
+spec:
+  steps:
+    - id: stream_to_bronze
+      source:
+        type: stream
+        landingSpace: device_kafka
+        connector: kafka.devices.raw
+        pattern: streaming
+      target:
+        zone: bronze
+        catalog: lakehouse
+        schema: bronze.devices
+        object: devices__events
+        format: iceberg
+      transform:
+        engine: flink
+        ref: local:///opt/flink/device-json-job.jar
+      trigger:
+        mode: continuous
+      intake:
+        on_failure: poison
+        max_attempts: 5
+      quality:
+        engine: deequ
+        contract_ref: contracts/devices_bronze.yaml
+        on_failure: warn
+      lineage:
+        upstream: [landing.devices.raw]
+        downstream: [silver.devices.events]

@@ -1,0 +1,11 @@
+apiVersion: platform/v1
+kind: Segment
+metadata:
+  id: fixtures.missing_landing
+  domain: fixtures
+spec:
+  landingSpaces:
+    - id: other_space
+      mode: tool_managed
+  pipelines:
+    - ref: pipeline.yaml

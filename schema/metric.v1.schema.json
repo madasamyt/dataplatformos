@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dataplatformos.dev/schemas/metric.v1.schema.json",
+  "title": "Metric",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "semantic/v1" },
+    "kind": { "const": "Metric" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical id, e.g. semantic.commerce.net_revenue"
+        },
+        "domain": { "type": "string" },
+        "owner": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "type"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Business-facing name (dropdown language)"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["simple", "derived", "ratio"]
+        },
+        "description": { "type": "string" },
+        "model": {
+          "type": "string",
+          "description": "Physical Gold/Semantic binding, e.g. gold.commerce.fct_sales"
+        },
+        "measure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "expr": { "type": "string" },
+            "agg": {
+              "type": "string",
+              "enum": ["sum", "count", "count_distinct", "avg", "min", "max", "median", "percentile"]
+            },
+            "percentile": { "type": "number" }
+          }
+        },
+        "dimensions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "derived_from": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Other metric ids for derived/ratio composition"
+        },
+        "filter": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "simple" } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["model", "measure"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "enum": ["derived", "ratio"] } },
+            "required": ["type"]
+          },
+          "then": {
+            "required": ["derived_from"],
+            "properties": {
+              "derived_from": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

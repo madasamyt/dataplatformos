@@ -1,0 +1,12 @@
+apiVersion: platform/v1
+kind: Segment
+metadata:
+  id: fixtures.bronze_quarantine
+  domain: fixtures
+spec:
+  landingSpaces:
+    - id: files
+      mode: platform_owned
+      storageRef: s3://acme-landing/fixtures/
+  pipelines:
+    - ref: pipeline.yaml

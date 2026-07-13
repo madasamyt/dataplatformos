@@ -1,0 +1,14 @@
+apiVersion: contract/v1
+kind: Contract
+metadata:
+  id: shopify_orders_bronze
+spec:
+  attributes:
+    - name: order_id
+      type: string
+      nullable: false
+    - name: status
+      type: string
+    - name: _ingested_at
+      type: timestamp
+      nullable: false

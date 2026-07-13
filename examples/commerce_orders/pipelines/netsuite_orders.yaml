@@ -1,0 +1,40 @@
+apiVersion: pipeline/v1
+kind: Pipeline
+metadata:
+  id: commerce.netsuite_orders
+  domain: commerce
+  owner: team-commerce-eng
+  description: "NetSuite orders CDC into Bronze (source-owned landing)"
+spec:
+  steps:
+    - id: cdc_to_bronze
+      source:
+        type: db_cdc
+        landingSpace: netsuite_ods
+        connector: debezium.netsuite
+        connection_ref: secrets/netsuite_cdc
+        pattern: cdc
+      target:
+        zone: bronze
+        catalog: lakehouse
+        schema: bronze.netsuite
+        object: netsuite__orders
+        format: iceberg
+      transform:
+        engine: dbt
+        ref: models/bronze/netsuite__orders.sql
+        dbt:
+          project: bronze_project
+          select: netsuite__orders
+      trigger:
+        mode: continuous
+      intake:
+        on_failure: poison
+        max_attempts: 3
+      quality:
+        engine: deequ
+        contract_ref: contracts/netsuite_orders_bronze.yaml
+        on_failure: warn
+      lineage:
+        upstream: [landing.netsuite.orders]
+        downstream: [silver.commerce.orders]

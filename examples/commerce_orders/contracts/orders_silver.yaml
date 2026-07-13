@@ -1,0 +1,19 @@
+apiVersion: contract/v1
+kind: Contract
+metadata:
+  id: orders_silver
+spec:
+  attributes:
+    - name: order_id
+      type: string
+      nullable: false
+    - name: order_status
+      type: string
+      accepted_values: [placed, shipped, cancelled, fulfilled, returned]
+    - name: customer_id
+      type: string
+      nullable: false
+    - name: net_amount
+      type: decimal
+      valid_range: { min: 0 }
+      derived_from: "gross_amount - discount_amount"

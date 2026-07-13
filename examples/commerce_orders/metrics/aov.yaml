@@ -1,0 +1,14 @@
+apiVersion: semantic/v1
+kind: Metric
+metadata:
+  id: semantic.commerce.aov
+  domain: commerce
+  owner: team-finance-analytics
+  description: "Average order value = net_revenue / order_count"
+spec:
+  label: AOV
+  type: ratio
+  derived_from:
+    - semantic.commerce.net_revenue
+    - semantic.commerce.order_count
+  dimensions: [order_date, region, channel]

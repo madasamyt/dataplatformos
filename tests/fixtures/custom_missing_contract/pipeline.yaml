@@ -1,0 +1,24 @@
+apiVersion: pipeline/v1
+kind: Pipeline
+metadata:
+  id: fixtures.custom_missing_contract
+spec:
+  steps:
+    - id: custom_step
+      source:
+        type: custom
+        object: input_table
+      target:
+        zone: silver
+        object: output_table
+        format: iceberg
+      transform:
+        engine: custom
+        image: acme/custom:1
+        command: ["python", "run.py"]
+      trigger:
+        mode: cron
+        schedule: "cron(0 1 * * ? *)"
+      quality:
+        contract_ref: missing.yaml
+        on_failure: fail_pipeline

@@ -1,0 +1,8 @@
+apiVersion: contract/v1
+kind: Contract
+metadata:
+  id: fixtures_bronze
+spec:
+  attributes:
+    - name: id
+      type: string
